@@ -167,24 +167,25 @@ public:
 
     void Init();
     void Reset();
-    MFRC522::StatusCode PcdReset();
+    StatusCode PcdReset();
     void WriteRegister(PCD_Register reg, uint8_t val);
     uint8_t ReadRegister(PCD_Register reg);
     void ClearRegisterBitMask(PCD_Register reg, uint8_t mask);
     void SetRegisterBitMask(PCD_Register reg, uint8_t mask);
     void AntennaOn();
     void AntennaOff();
-    MFRC522::StatusCode CommunicateWithTag(PCD_Command Command, const uint8_t *pInData,
+    StatusCode CommunicateWithTag(PCD_Command Command, const uint8_t *pInData,
                                            uint8_t InLenByte, uint8_t *pOutData, uint32_t *pOutLenBit);
     void CalulateCRC(const uint8_t *pIndata, uint8_t len, uint8_t *pOutData);
-    MFRC522::StatusCode Request(PICC_Command req_code, uint8_t *pTagType);
-    MFRC522::StatusCode Anticollision(uint8_t *pSnr);
-    MFRC522::StatusCode SelectTag(const uint8_t *pSnr);
-    MFRC522::StatusCode Authenticate(PICC_Command auth_mode, uint8_t addr, const uint8_t *pKey, const uint8_t *pSnr);
-    MFRC522::StatusCode ReadBlock(uint8_t addr, uint8_t *pData);
-    MFRC522::StatusCode WriteBlock(uint8_t addr, const uint8_t *pData);
-    MFRC522::StatusCode HaltTag();
-    MFRC522::StatusCode ReadCardUIDAndData(uint8_t blockAddr, uint8_t *pDataBuffer16Bytes, uint8_t *pUidBuffer4Bytes);
+    StatusCode Request(PICC_Command req_code, uint8_t *pTagType);
+    StatusCode Anticollision(uint8_t *pSnr);
+    StatusCode SelectTag(const uint8_t *pSnr, uint8_t* pSakBuffer = nullptr);
+    StatusCode Authenticate(PICC_Command auth_mode, uint8_t addr, const uint8_t *pKey, const uint8_t *pSnr);
+    StatusCode ReadBlock(uint8_t addr, uint8_t *pData);
+    StatusCode WriteBlock(uint8_t addr, const uint8_t *pData);
+    StatusCode HaltTag();
+    StatusCode ReadCardUIDAndData(uint8_t blockAddr, uint8_t *pDataBuffer16Bytes, uint8_t *pUidBuffer4Bytes);
+    StatusCode ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataBuffer16Bytes, uint8_t *pUidBuffer4Bytes);
 
     // ===========
     // char PcdValue(unsigned char dd_mode, unsigned char addr, unsigned char *pValue);
@@ -204,7 +205,7 @@ private:
 
     bool spi_initialized = false;
 
-    void Init(); // Initializes GPIO pins and SPI peripheral
+    // void Init(); // Initializes GPIO pins and SPI peripheral
 };
 
 #endif // MFRC522_H_
