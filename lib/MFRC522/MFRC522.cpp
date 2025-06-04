@@ -457,35 +457,60 @@ MFRC522::StatusCode MFRC522::Anticollision(uint8_t *pSnr)
 //           pSakBuffer[OUT]:存储SAK值
 // 返    回: 成功返回MI_OK
 /////////////////////////////////////////////////////////////////////
-MFRC522::StatusCode MFRC522::SelectTag(const uint8_t *pSerialNumber, uint8_t* pSakBuffer)
+MFRC522::StatusCode MFRC522::SelectTag(const uint8_t *pSerialNumber, uint8_t *pSakBuffer)
 {
     StatusCode status = StatusCode::MI_NOTAGERR;
     uint32_t received_bits;
-    uint8_t command_data[9];
-    uint8_t response_buffer[MAX_COMM_BUFFER_LEN]; // MAX_COMM_BUFFER_LEN = 18
+    uint8_t i;
+    uint8_t ucComMF522Buf[MAX_COMM_BUFFER_LEN]; // MAX_COMM_BUFFER_LEN = 18
 
-    command_data[0] = static_cast<uint8_t>(PICC_Command::ANTICOLL1); // 防冲撞命令
-    command_data[1] = 0x70;
-    // command_data[6] = 0;
-    // for (i = 0; i < 4; i++)
-    // {
-    //     command_data[i + 2] = *(pSerialNumber + i); // 填充卡的序列号
-    //     command_data[6] ^= *(pSerialNumber + i);    // 计算校验码
-    // }
-    memcpy(&command_data[2], pSerialNumber, 5);
-    CalulateCRC(command_data, 7, &command_data[7]);     // 获得CRC校验结果的16位值
-                                                          // 放入command_data【0，1】
+    ucComMF522Buf[0] = static_cast<uint8_t>(PICC_Command::ANTICOLL1); // 防冲撞命令
+    ucComMF522Buf[1] = 0x70;
+    ucComMF522Buf[6] = 0;
+    for (i = 0; i < 4; i++)
+    {
+        ucComMF522Buf[i + 2] = *(pSerialNumber + i); // 填充卡的序列号
+        ucComMF522Buf[6] ^= *(pSerialNumber + i);    // 计算校验码
+    }
+    // memcpy(&command_data[2], pSerialNumber, 5);     // UID(4) + BCC(1)
+    CalulateCRC(ucComMF522Buf, 7, &ucComMF522Buf[7]); // 获得CRC校验结果的16位值
+                                                    // 放入command_data【0，1】
+
+    printf("SelectTag: Sending command_data (9 bytes): ");
+    for (int i = 0; i < 7; ++i)
+    {
+        printf("%02X ", ucComMF522Buf[i]);
+    }
+    printf("\n");
+
     ClearRegisterBitMask(PCD_Register::Status2Reg, 0x08); // 清零MFAuthent Command执行成功标志位
     // 把CRC值和卡号发的卡里
-    status = CommunicateWithTag(PCD_Command::TRANSCEIVE, command_data, 9, response_buffer, &received_bits);
+    status = CommunicateWithTag(PCD_Command::TRANSCEIVE, ucComMF522Buf, 9, ucComMF522Buf, &received_bits);
     printf("SelectTag CommunicateWithTag. Status code: %u\n", static_cast<unsigned int>(status));
-    printf("SelectTag: SAK = 0x%02X\n", response_buffer[0]);
-    if ((status == StatusCode::MI_OK) && (received_bits == 0x18)) // 返回24个字节&状态为无错误 SAK (1 byte) + CRC_A (2 bytes) = 24 bits
+    printf("SelectTag: SAK = 0x%02X\n", ucComMF522Buf[0]);
+    if (status == StatusCode::MI_OK && received_bits > 0 && pSakBuffer)
     {
-        if (pSakBuffer != nullptr) {
-            *pSakBuffer = response_buffer[0]; // 存储SAK值
+        unsigned int len_bytes = received_bits / 8;
+        if (received_bits % 8 != 0)
+            len_bytes++; // account for partial bytes if any
+        if (len_bytes > MAX_COMM_BUFFER_LEN)
+            len_bytes = MAX_COMM_BUFFER_LEN;
+
+        printf("SelectTag: Response buffer (first %u bytes): ", len_bytes);
+        for (unsigned int i = 0; i < len_bytes; ++i)
+        {
+            printf("%02X ", ucComMF522Buf[i]);
         }
-        if (response_buffer[0] & 0x04) { // UID not complete, further cascading needed
+        printf("\n");
+    }
+    if ((status == StatusCode::MI_OK) && (received_bits > 0)) // 返回24个字节&状态为无错误 SAK (1 byte) + CRC_A (2 bytes) = 24 bits
+    {
+        if (pSakBuffer != nullptr)
+        {
+            *pSakBuffer = ucComMF522Buf[0]; // 存储SAK值
+        }
+        if (ucComMF522Buf[0] & 0x04)
+        { // UID not complete, further cascading needed
             return StatusCode::MI_ERR;
         }
         // status = StatusCode::MI_OK;
@@ -529,7 +554,7 @@ MFRC522::StatusCode MFRC522::Authenticate(PICC_Command auth_mode, uint8_t addr, 
     // memcpy(&command_data[8], pSnr, 4); // Use first 4 bytes of UID
 
     // status = CommunicateWithTag(PCD_Command::AUTHENT, command_data, 12, command_data, &unLen); // 验证密码和卡号
-    status = CommunicateWithTag(PCD_Command::AUTHENT, command_data, 12, nullptr, &unLen);    // 验证密码和卡号
+    status = CommunicateWithTag(PCD_Command::AUTHENT, command_data, 12, nullptr, &unLen); // 验证密码和卡号
     printf("Authenticate CommunicateWithTag read card. Status code: %u\n", static_cast<unsigned int>(status));
     if ((status != StatusCode::MI_OK) || (!(ReadRegister(PCD_Register::Status2Reg) & 0x08))) // 密码验证是否成功
     {
@@ -684,16 +709,18 @@ MFRC522::StatusCode MFRC522::ReadCardUIDAndData(uint8_t blockAddr, uint8_t *pDat
 }
 
 // 实现新的 ReadIso14443aData 方法
-MFRC522::StatusCode MFRC522::ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataBuffer16Bytes, uint8_t *pUidBuffer4Bytes) {
+MFRC522::StatusCode MFRC522::ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataBuffer16Bytes, uint8_t *pUidBuffer4Bytes)
+{
     StatusCode status;
     uint8_t tag_type_buffer[2];
     uint8_t serial_buffer_with_bcc[5]; // 4 UID + 1 BCC
-    uint8_t sak_value = 0xFF; // 初始化为一个无效的SAK值
+    uint8_t sak_value = 0xFF;          // 初始化为一个无效的SAK值
 
     // 1. 寻卡 (Request)
     status = Request(PICC_Command::REQALL, tag_type_buffer);
     printf("Request card. Status code: %u\n", static_cast<unsigned int>(status));
-    if (status != StatusCode::MI_OK) {
+    if (status != StatusCode::MI_OK)
+    {
         // printf("ReadIso14443aData: Request failed (%u)\n", static_cast<unsigned int>(status));
         return status;
     }
@@ -701,7 +728,8 @@ MFRC522::StatusCode MFRC522::ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataB
     // 2. 防冲突 (Anticollision)
     status = Anticollision(serial_buffer_with_bcc);
     printf("Anticollision card. Status code: %u\n", static_cast<unsigned int>(status));
-    if (status != StatusCode::MI_OK) {
+    if (status != StatusCode::MI_OK)
+    {
         // printf("ReadIso14443aData: Anticollision failed (%u)\n", static_cast<unsigned int>(status));
         return status;
     }
@@ -710,7 +738,8 @@ MFRC522::StatusCode MFRC522::ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataB
     // 3. 选卡 (SelectTag) 并获取SAK
     status = SelectTag(serial_buffer_with_bcc, &sak_value);
     printf("SelectTag card. Status code: %u\n", static_cast<unsigned int>(status));
-    if (status != StatusCode::MI_OK) {
+    if (status != StatusCode::MI_OK)
+    {
         // printf("ReadIso14443aData: SelectTag failed (%u)\n", static_cast<unsigned int>(status));
         return status;
     }
@@ -725,20 +754,25 @@ MFRC522::StatusCode MFRC522::ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataB
     // NTAGs that support ISO14443-4 might have SAK 0x20.
     // For simplicity, we assume SAK 0x08 and 0x18 require Mifare Auth for block read.
     // Other SAK values (like 0x00 for typical NTAG/Ultralight) will skip auth for ReadBlock.
-    if (sak_value == 0x08 || sak_value == 0x18) {
+    if (sak_value == 0x08 || sak_value == 0x18)
+    {
         needs_authentication = true;
     }
     // Note: More sophisticated SAK parsing might be needed for a wider range of cards.
 
-    if (needs_authentication) {
+    if (needs_authentication)
+    {
         // printf("ReadIso14443aData: Needs Mifare Authentication for block/page %u.\n", pageAddr);
         status = Authenticate(PICC_Command::AUTHENT1A, pageAddr, DefaultKeyA, pUidBuffer4Bytes);
         printf("Authenticate card. Status code: %u\n", static_cast<unsigned int>(status));
-        if (status != StatusCode::MI_OK) {
+        if (status != StatusCode::MI_OK)
+        {
             // printf("ReadIso14443aData: Authenticate failed (%u)\n", static_cast<unsigned int>(status));
             return status;
         }
-    } else {
+    }
+    else
+    {
         // printf("ReadIso14443aData: Skipping Mifare Authentication for SAK 0x%02X, page %u.\n", sak_value, pageAddr);
     }
 
@@ -746,11 +780,12 @@ MFRC522::StatusCode MFRC522::ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataB
     // ReadBlock 方法读取16字节。对于NTAG/Ultralight, pageAddr是起始页地址，它会读取4个连续页。
     status = ReadBlock(pageAddr, pDataBuffer16Bytes);
     printf("ReadBlock card. Status code: %u\n", static_cast<unsigned int>(status));
-    if (status != StatusCode::MI_OK) {
+    if (status != StatusCode::MI_OK)
+    {
         // printf("ReadIso14443aData: ReadBlock failed (%u)\n", static_cast<unsigned int>(status));
         return status;
     }
-    
+
     return StatusCode::MI_OK;
 }
 
