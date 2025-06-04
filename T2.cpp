@@ -55,13 +55,15 @@ int main()
 
     while (true)
     {
-        // printf("Reading RFID card data...\n");
-        // RFID_Read_Data(3); // 示例：读取扇区 3 的数据
-        // sleep_ms(1000);
+        // 对于NTAG/Ultralight (NFC Type 2), pageAddr 是起始页地址。
+        // MFRC522::ReadBlock 会读取16字节 (即4个连续的4字节页)。
+        // NTAG的用户数据区通常从第0x04页开始。
+        // 对于Mifare Classic, pageAddr 对应的是块地址。
+        uint8_t start_page_address = 0x04; // 尝试读取从第4页开始的16字节
 
         printf("Attempting to read RFID card: UID and data from block 3...\n");
 
-        MFRC522::StatusCode status = rfid.ReadCardUIDAndData(3, card_data_buffer, card_uid_buffer);
+        MFRC522::StatusCode status = rfid.ReadIso14443aData(start_page_address, card_data_buffer, card_uid_buffer);
 
         if (status == MFRC522::StatusCode::MI_OK)
         {
@@ -72,9 +74,8 @@ int main()
             }
             printf("\n");
 
-            printf("Data from block 3: ");
-            for (int i = 0; i < MFRC522::CARD_BLOCK_DATA_LEN; i++)
-            {
+            printf("Data from page/block %u (16 bytes): ", start_page_address);
+            for (int i = 0; i < MFRC522::CARD_BLOCK_DATA_LEN; i++) {
                 printf("%02X ", card_data_buffer[i]);
             }
             printf("\nOperation read successful!\n");
@@ -94,6 +95,6 @@ int main()
             // rfid.SoftwareReset();
         }
 
-        sleep_ms(1000); // Wait before next attempt
+        sleep_ms(5 * 1000); // Wait before next attempt
     }
 }
