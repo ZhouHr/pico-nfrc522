@@ -174,17 +174,21 @@ namespace RFID
         /////////////////////////////////////////////////////////////////////
         enum class StatusCode : uint8_t
         {
-            MI_OK = 0x00,          // 成功
-            MI_NOTAGERR = 0x01,    // 无卡错误
-            MI_ERR = 0x02,         // 一般错误
-            MI_CRCERR = 0x03,      // CRC校验错误
-            MI_PARITYERR = 0x04,   // 奇偶校验错误
-            MI_AUTHERR = 0x05,     // 认证错误
-            MI_PROTOCOLERR = 0x06, // 协议错误
-            MI_COLLERR = 0x07,     // 冲突错误
-            MI_BUFFEROVF = 0x08,   // 缓冲区溢出
-            MI_TIMEOUT = 0x09,     // 超时错误
-            MI_INITERR = 0x0A,     // 初始化错误
+            MI_OK = 0x00,            // 成功
+            MI_NOTAGERR = 0x01,      // 无卡错误
+            MI_ERR = 0x02,           // 一般错误
+            MI_CRCERR = 0x03,        // CRC校验错误
+            MI_PARITYERR = 0x04,     // 奇偶校验错误
+            MI_AUTHERR = 0x05,       // 认证错误
+            MI_PROTOCOLERR = 0x06,   // 协议错误
+            MI_COLLERR = 0x07,       // 冲突错误
+            MI_BUFFEROVF = 0x08,     // 缓冲区溢出
+            MI_TIMEOUT = 0x09,       // 超时错误
+            MI_INITERR = 0x0A,       // 初始化错误
+            MI_RESET_FAIL = 0x0B,    // 复位失败
+            MI_POWERDOWN_ERR = 0x0C, // PowerDown位未清除
+            MI_BBCERR = 0x0D,        // BBC校验错误
+            MI_AUTHERR = 0x0E,       // 密码校验错误
         };
 
         // 常量定义
@@ -222,7 +226,7 @@ namespace RFID
         // 通信函数
         StatusCode CommunicateWithTag(PCD_Command Command, const uint8_t *pInData,
                                       uint8_t InLenByte, uint8_t *pOutData, uint32_t *pOutLenBit);
-        void CalulateCRC(const uint8_t *pIndata, uint8_t len, uint8_t *pOutData);
+        StatusCode CalulateCRC(const uint8_t *pIndata, uint8_t len, uint8_t *pOutData);
 
         // 卡片操作基本函数
         StatusCode Request(PICC_Command req_code, uint8_t *pTagType);

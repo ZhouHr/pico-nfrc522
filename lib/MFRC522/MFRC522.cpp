@@ -85,11 +85,19 @@ namespace RFID
         Reset(); // 使用硬件复位
         WriteRegister(PCD_Register::CommandReg, static_cast<uint8_t>(PCD_Command::RESET_PHASE));
 
-        // 检查CommandReg是否已清除（IDLE）
+        // 通过读取VersionReg来检查复位是否成功
+        uint8_t version = ReadRegister(PCD_Register::VersionReg);
+        if (version == 0x00 || version == 0xFF)
+        {
+            // 如果读取到0x00或0xFF,说明芯片未正确响应,复位失败
+            return StatusCode::MI_RESET_FAIL;
+        }
+
+        // 检查PowerDown位是否已清除
         if (ReadRegister(PCD_Register::CommandReg) & (1 << 4))
-        { // 检查PowerDown位，如果仍然设置，则复位失败
-          // 这个检查可能不够健壮，RESET_PHASE应该清除它。
-          // 更好的检查可能是查看VersionReg是否可读。
+        {
+            // PowerDown位未清除,说明芯片仍处于掉电状态
+            return StatusCode::MI_POWERDOWN_ERR;
         }
 
         sleep_ms(10);
@@ -320,7 +328,7 @@ namespace RFID
     // 功    能：用MF522计算CRC16函数
     // 参数说明:
     /////////////////////////////////////////////////////////////////////
-    void MFRC522::CalulateCRC(const uint8_t *pIndata, uint8_t len, uint8_t *pOutData)
+    StatusCode MFRC522::CalulateCRC(const uint8_t *pIndata, uint8_t len, uint8_t *pOutData)
     {
         uint8_t i, n;
         ClearRegisterBitMask(PCD_Register::DivIrqReg, 0x04);                              // 禁止CRC
@@ -337,8 +345,18 @@ namespace RFID
             n = ReadRegister(PCD_Register::DivIrqReg); // 读中断请求标志寄存器
             i--;
         } while ((i != 0) && !(n & 0x04));
+
+        if (i == 0)
+        {
+            // 如果超时,返回错误
+            return StatusCode::MI_TIMEOUT;
+        }
+
+        // 读取CRC结果
         pOutData[0] = ReadRegister(PCD_Register::CRCResultRegL); // CRC校验的低8位
         pOutData[1] = ReadRegister(PCD_Register::CRCResultRegM); // CRC校验的高8位
+
+        return StatusCode::MI_OK;
     }
 
     /////////////////////////////////////////////////////////////////////
@@ -367,6 +385,11 @@ namespace RFID
         ucComMF522Buf[0] = {static_cast<uint8_t>(req_code)};  // 取522要执行的命令
         // 向PICC发送寻天线区内全部卡命令，并接收PICC返回的数据
         status = CommunicateWithTag(PCD_Command::TRANSCEIVE, ucComMF522Buf, 1, ucComMF522Buf, &unLen);
+        // 如果通信本身就失败了，直接返回CommunicateWithTag的错误码
+        if (status != StatusCode::MI_OK)
+        {
+            return status;
+        }
 
         if ((status == StatusCode::MI_OK) && (unLen == 0x10)) // 没有错误并接接收为2个字节
         {
@@ -375,7 +398,7 @@ namespace RFID
         }
         else
         {
-            status = StatusCode::MI_ERR;
+            return StatusCode::MI_NOTAGERR; // 未寻到卡片
         } // 错误
 
         WriteRegister(PCD_Register::BitFramingReg, 0x00); // Reset to 0 bits for subsequent commands
@@ -420,16 +443,25 @@ namespace RFID
         ucComMF522Buf[1] = 0x20;
         // 获得卡的序列号，ucComMF522Buf[]
         status = CommunicateWithTag(PCD_Command::TRANSCEIVE, ucComMF522Buf, 2, ucComMF522Buf, &unLen);
+
+        // 如果通信本身就失败了，直接返回CommunicateWithTag的错误码
+        if (status != StatusCode::MI_OK)
+        {
+            return status;
+        }
+
         if (status == StatusCode::MI_OK)
         {
+            // 循环处理4字节的卡序列号
             for (i = 0; i < 4; i++)
             {
-                *(pSnr + i) = ucComMF522Buf[i]; // 返回卡的序列号
-                snr_check ^= ucComMF522Buf[i];  // 计算校验码
+                *(pSnr + i) = ucComMF522Buf[i]; // 将接收缓冲区中的卡序列号复制到输出缓冲区
+                snr_check ^= ucComMF522Buf[i];  // 使用异或运算计算BCC(Block Check Character)校验码
+                                                // BCC校验码是所有UID字节的异或结果
             }
             if (snr_check != ucComMF522Buf[i])
             {
-                status = StatusCode::MI_ERR;
+                status = StatusCode::MI_BBCERR;
             } // 有错误
             // 如果需要获取SAK值，调用SelectTag
             if (pSak != nullptr && status == StatusCode::MI_OK)
@@ -465,8 +497,8 @@ namespace RFID
             command_data[6] ^= *(pSerialNumber + i);    // 计算校验码
         }
         // memcpy(&command_data[2], pSerialNumber, 5);     // UID(4) + BCC(1)
-        CalulateCRC(command_data, 7, &command_data[7]); // 获得CRC校验结果的16位值
-                                                        // 放入command_data【0，1】
+        status = CalulateCRC(command_data, 7, &command_data[7]); // 获得CRC校验结果的16位值
+                                                                 // 放入command_data【0，1】
 
         if (m_debug_enabled)
         {
@@ -478,6 +510,11 @@ namespace RFID
             printf("\n");
         }
 
+        if (status != StatusCode::MI_OK)
+        {
+            return status;
+        }
+
         ClearRegisterBitMask(PCD_Register::Status2Reg, 0x08); // 清零MFAuthent Command执行成功标志位
         // 把CRC值和卡号发的卡里
         status = CommunicateWithTag(PCD_Command::TRANSCEIVE, command_data, 9, command_data, &received_bits);
@@ -486,6 +523,12 @@ namespace RFID
             printf("SelectTag CommunicateWithTag. Status code: %u\n", static_cast<unsigned int>(status));
             printf("SelectTag: SAK = 0x%02X\n", command_data[0]);
         }
+        // 如果通信本身就失败了，直接返回CommunicateWithTag的错误码
+        if (status != StatusCode::MI_OK)
+        {
+            return status;
+        }
+
         if (status == StatusCode::MI_OK && received_bits > 0 && pSakBuffer)
         {
             unsigned int len_bytes = received_bits / 8;
@@ -560,9 +603,15 @@ namespace RFID
         {
             printf("Authenticate CommunicateWithTag read card. Status code: %u\n", static_cast<unsigned int>(status));
         }
-        if ((status != StatusCode::MI_OK) || (!(ReadRegister(PCD_Register::Status2Reg) & 0x08))) // 密码验证是否成功
+
+        if (status != StatusCode::MI_OK)
         {
-            status = StatusCode::MI_ERR;
+            return status;
+        }
+
+        if (!(ReadRegister(PCD_Register::Status2Reg) & 0x08)) // 密码验证是否成功
+        {
+            status = StatusCode::MI_AUTHERR;
         }
 
         return status;
@@ -586,6 +635,12 @@ namespace RFID
         CalulateCRC(ucComMF522Buf, 2, &ucComMF522Buf[2]);
 
         status = CommunicateWithTag(PCD_Command::TRANSCEIVE, ucComMF522Buf, 4, ucComMF522Buf, &unLen);
+
+        if (status != StatusCode::MI_OK)
+        {
+            return status;
+        }
+
         if ((status == StatusCode::MI_OK) && (unLen == 0x90))
         {
             for (i = 0; i < 16; i++)
@@ -620,7 +675,12 @@ namespace RFID
                                                           // 存放于ucCoMF522Buf【0，1】
         status = CommunicateWithTag(PCD_Command::TRANSCEIVE, ucComMF522Buf, 4, ucComMF522Buf, &unLen);
 
-        if ((status != StatusCode::MI_OK) || (unLen != 4) || ((ucComMF522Buf[0] & 0x0F) != 0x0A))
+        if (status != StatusCode::MI_OK)
+        {
+            return status;
+        }
+
+        if ((unLen != 4) || ((ucComMF522Buf[0] & 0x0F) != 0x0A))
         {
             status = StatusCode::MI_ERR;
         }
@@ -634,7 +694,13 @@ namespace RFID
             CalulateCRC(ucComMF522Buf, 16, &ucComMF522Buf[16]);                                             // 对数据进行CRC校验校验值
                                                                                                             // 存放于ucCoMF522Buf【0，1】
             status = CommunicateWithTag(PCD_Command::TRANSCEIVE, ucComMF522Buf, 18, ucComMF522Buf, &unLen); // 发送数据，并接收卡返回的数据
-            if ((status != StatusCode::MI_OK) || (unLen != 4) || ((ucComMF522Buf[0] & 0x0F) != 0x0A))
+
+            if (status != StatusCode::MI_OK)
+            {
+                return status;
+            }
+
+            if ((unLen != 4) || ((ucComMF522Buf[0] & 0x0F) != 0x0A))
             {
                 status = StatusCode::MI_ERR;
             }
