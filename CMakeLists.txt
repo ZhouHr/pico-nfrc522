@@ -37,7 +37,7 @@ pico_sdk_init()
 
 add_executable(T2 
     T2.cpp
-    lib/MFRC522/MFRC522.c
+    lib/MFRC522/MFRC522.cpp
 )
 
 pico_set_program_name(T2 "T2")
