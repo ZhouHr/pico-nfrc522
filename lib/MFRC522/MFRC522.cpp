@@ -419,17 +419,34 @@ MFRC522::StatusCode MFRC522::Request(PICC_Command req_code, uint8_t *pTagType)
 // 参数说明: pSnr[OUT]:卡片序列号，4字节
 // 返    回: 成功返回MI_OK
 /////////////////////////////////////////////////////////////////////
-MFRC522::StatusCode MFRC522::Anticollision(uint8_t *pSnr)
+MFRC522::StatusCode MFRC522::Anticollision(uint8_t *pSnr, uint8_t cascadeLevel, uint8_t *pSak)
 {
     StatusCode status;
     uint32_t unLen;
     uint8_t i, snr_check = 0;
     uint8_t ucComMF522Buf[MAX_COMM_BUFFER_LEN];
+    PICC_Command antiCollCmd;
+    // 根据级联级别选择相应的防冲撞命令
+    switch (cascadeLevel)
+    {
+    case 1:
+        antiCollCmd = PICC_Command::ANTICOLL1;
+        break;
+    case 2:
+        antiCollCmd = PICC_Command::ANTICOLL2;
+        break;
+    case 3:
+        antiCollCmd = PICC_Command::ANTICOLL3;
+        break;
+    default:
+        antiCollCmd = PICC_Command::ANTICOLL1;
+        break;
+    }
 
-    ClearRegisterBitMask(PCD_Register::Status2Reg, 0x08);             // 清除标志位
-    WriteRegister(PCD_Register::BitFramingReg, 0x00);                 // 000 指示最后一个字节的所有位将被发送。
-    ClearRegisterBitMask(PCD_Register::CollReg, 0x80);                // 发生碰撞所有接收位将被清除
-    ucComMF522Buf[0] = static_cast<uint8_t>(PICC_Command::ANTICOLL1); // 0x93 防冲撞 发到卡里的命令
+    ClearRegisterBitMask(PCD_Register::Status2Reg, 0x08); // 清除标志位
+    WriteRegister(PCD_Register::BitFramingReg, 0x00);     // 000 指示最后一个字节的所有位将被发送。
+    ClearRegisterBitMask(PCD_Register::CollReg, 0x80);    // 发生碰撞所有接收位将被清除
+    ucComMF522Buf[0] = static_cast<uint8_t>(antiCollCmd); // 0x93 防冲撞 发到卡里的命令
     ucComMF522Buf[1] = 0x20;
     // 获得卡的序列号，ucComMF522Buf[]
     status = CommunicateWithTag(PCD_Command::TRANSCEIVE, ucComMF522Buf, 2, ucComMF522Buf, &unLen);
@@ -444,6 +461,11 @@ MFRC522::StatusCode MFRC522::Anticollision(uint8_t *pSnr)
         {
             status = StatusCode::MI_ERR;
         } // 有错误
+        // 如果需要获取SAK值，调用SelectTag
+        if (pSak != nullptr && status == StatusCode::MI_OK)
+        {
+            status = SelectTag(pSnr, pSak);
+        }
     }
 
     SetRegisterBitMask(PCD_Register::CollReg, 0x80); // 置位防碰撞位
@@ -462,32 +484,32 @@ MFRC522::StatusCode MFRC522::SelectTag(const uint8_t *pSerialNumber, uint8_t *pS
     StatusCode status = StatusCode::MI_NOTAGERR;
     uint32_t received_bits;
     uint8_t i;
-    uint8_t ucComMF522Buf[MAX_COMM_BUFFER_LEN]; // MAX_COMM_BUFFER_LEN = 18
+    uint8_t command_data[MAX_COMM_BUFFER_LEN]; // MAX_COMM_BUFFER_LEN = 18
 
-    ucComMF522Buf[0] = static_cast<uint8_t>(PICC_Command::ANTICOLL1); // 防冲撞命令
-    ucComMF522Buf[1] = 0x70;
-    ucComMF522Buf[6] = 0;
+    command_data[0] = static_cast<uint8_t>(PICC_Command::ANTICOLL1); // 防冲撞命令
+    command_data[1] = 0x70;
+    command_data[6] = 0;
     for (i = 0; i < 4; i++)
     {
-        ucComMF522Buf[i + 2] = *(pSerialNumber + i); // 填充卡的序列号
-        ucComMF522Buf[6] ^= *(pSerialNumber + i);    // 计算校验码
+        command_data[i + 2] = *(pSerialNumber + i); // 填充卡的序列号
+        command_data[6] ^= *(pSerialNumber + i);    // 计算校验码
     }
     // memcpy(&command_data[2], pSerialNumber, 5);     // UID(4) + BCC(1)
-    CalulateCRC(ucComMF522Buf, 7, &ucComMF522Buf[7]); // 获得CRC校验结果的16位值
+    CalulateCRC(command_data, 7, &command_data[7]); // 获得CRC校验结果的16位值
                                                     // 放入command_data【0，1】
 
     printf("SelectTag: Sending command_data (9 bytes): ");
     for (int i = 0; i < 7; ++i)
     {
-        printf("%02X ", ucComMF522Buf[i]);
+        printf("%02X ", command_data[i]);
     }
     printf("\n");
 
     ClearRegisterBitMask(PCD_Register::Status2Reg, 0x08); // 清零MFAuthent Command执行成功标志位
     // 把CRC值和卡号发的卡里
-    status = CommunicateWithTag(PCD_Command::TRANSCEIVE, ucComMF522Buf, 9, ucComMF522Buf, &received_bits);
+    status = CommunicateWithTag(PCD_Command::TRANSCEIVE, command_data, 9, command_data, &received_bits);
     printf("SelectTag CommunicateWithTag. Status code: %u\n", static_cast<unsigned int>(status));
-    printf("SelectTag: SAK = 0x%02X\n", ucComMF522Buf[0]);
+    printf("SelectTag: SAK = 0x%02X\n", command_data[0]);
     if (status == StatusCode::MI_OK && received_bits > 0 && pSakBuffer)
     {
         unsigned int len_bytes = received_bits / 8;
@@ -499,7 +521,7 @@ MFRC522::StatusCode MFRC522::SelectTag(const uint8_t *pSerialNumber, uint8_t *pS
         printf("SelectTag: Response buffer (first %u bytes): ", len_bytes);
         for (unsigned int i = 0; i < len_bytes; ++i)
         {
-            printf("%02X ", ucComMF522Buf[i]);
+            printf("%02X ", command_data[i]);
         }
         printf("\n");
     }
@@ -507,9 +529,9 @@ MFRC522::StatusCode MFRC522::SelectTag(const uint8_t *pSerialNumber, uint8_t *pS
     {
         if (pSakBuffer != nullptr)
         {
-            *pSakBuffer = ucComMF522Buf[0]; // 存储SAK值
+            *pSakBuffer = command_data[0]; // 存储SAK值
         }
-        if (ucComMF522Buf[0] & 0x04)
+        if (command_data[0] & 0x04)
         { // UID not complete, further cascading needed
             return StatusCode::MI_ERR;
         }
@@ -661,6 +683,92 @@ MFRC522::StatusCode MFRC522::HaltTag()
     return status;
 }
 
+/////////////////////////////////////////////////////////////////////
+// 函数名称：ReadCompleteUID
+// 功    能：读取完整的多级UID
+// 参数说明: pUidBuffer[OUT]: 存储UID的缓冲区，至少10字节
+//           pUidLength[OUT]: 返回UID的实际长度
+//           pSak[OUT]: 可选，存储最后一级的SAK值
+// 返    回: 成功返回MI_OK
+/////////////////////////////////////////////////////////////////////
+MFRC522::StatusCode MFRC522::ReadCompleteUID(uint8_t *pUidBuffer, uint8_t *pUidLength, uint8_t *pSak)
+{
+    StatusCode status;
+    uint8_t currentUid[5]; // 4字节UID + 1字节BCC
+    uint8_t currentSak = 0;
+    uint8_t cascadeLevel = 1;
+    uint8_t uidIndex = 0;
+    bool uidComplete = false;
+
+    // 初始化UID长度为0
+    *pUidLength = 0;
+
+    // 寻卡
+    uint8_t tag_type_buffer[2];
+    status = Request(PICC_Command::REQALL, tag_type_buffer);
+    if (status != StatusCode::MI_OK)
+    {
+        return status;
+    }
+
+    // 循环处理多级UID
+    while (!uidComplete && cascadeLevel <= 3)
+    {
+        // 防冲突
+        status = Anticollision(currentUid, cascadeLevel);
+        if (status != StatusCode::MI_OK)
+        {
+            return status;
+        }
+
+        // 选卡并获取SAK
+        status = SelectTag(currentUid, &currentSak);
+        if (status != StatusCode::MI_OK)
+        {
+            return status;
+        }
+
+        // 检查SAK的bit2，判断UID是否完整
+        // 如果bit2为0，表示UID已完整；如果为1，表示需要继续级联
+        if ((currentSak & 0x04) == 0)
+        {
+            uidComplete = true;
+        }
+
+        // 复制UID到输出缓冲区
+        // 对于级联的情况，第一个字节是级联标记(0x88)，不是UID的一部分
+        if (cascadeLevel == 1 || (currentUid[0] != 0x88))
+        {
+            // 普通情况，复制全部4字节
+            for (int i = 0; i < 4; i++)
+            {
+                pUidBuffer[uidIndex++] = currentUid[i];
+            }
+            *pUidLength += 4;
+        }
+        else
+        {
+            // 级联情况，跳过第一个字节
+            for (int i = 1; i < 4; i++)
+            {
+                pUidBuffer[uidIndex++] = currentUid[i];
+            }
+            *pUidLength += 3;
+        }
+
+        // 增加级联级别
+        cascadeLevel++;
+    }
+
+    // 如果需要返回SAK值
+    if (pSak != nullptr)
+    {
+        *pSak = currentSak;
+    }
+
+    return StatusCode::MI_OK;
+}
+
 MFRC522::StatusCode MFRC522::ReadCardUIDAndData(uint8_t blockAddr, uint8_t *pDataBuffer16Bytes, uint8_t *pUidBuffer4Bytes)
 {
     StatusCode status;
@@ -709,12 +817,12 @@ MFRC522::StatusCode MFRC522::ReadCardUIDAndData(uint8_t blockAddr, uint8_t *pDat
 }
 
 // 实现新的 ReadIso14443aData 方法
-MFRC522::StatusCode MFRC522::ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataBuffer16Bytes, uint8_t *pUidBuffer4Bytes)
+MFRC522::StatusCode MFRC522::ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataBuffer16Bytes, uint8_t *pUidBuffer, uint8_t *pUidLength)
 {
     StatusCode status;
     uint8_t tag_type_buffer[2];
-    uint8_t serial_buffer_with_bcc[5]; // 4 UID + 1 BCC
-    uint8_t sak_value = 0xFF;          // 初始化为一个无效的SAK值
+    uint8_t uid_length = 0;
+    uint8_t sak_value = 0xFF; // 初始化为一个无效的SAK值
 
     // 1. 寻卡 (Request)
     status = Request(PICC_Command::REQALL, tag_type_buffer);
@@ -725,25 +833,33 @@ MFRC522::StatusCode MFRC522::ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataB
         return status;
     }
 
-    // 2. 防冲突 (Anticollision)
-    status = Anticollision(serial_buffer_with_bcc);
-    printf("Anticollision card. Status code: %u\n", static_cast<unsigned int>(status));
+    // 1. 读取完整UID和SAK
+    status = ReadCompleteUID(pUidBuffer, &uid_length, &sak_value);
+    printf("ReadCompleteUID. Status code: %u, UID length: %u\n", static_cast<unsigned int>(status), uid_length);
     if (status != StatusCode::MI_OK)
     {
-        // printf("ReadIso14443aData: Anticollision failed (%u)\n", static_cast<unsigned int>(status));
         return status;
     }
-    memcpy(pUidBuffer4Bytes, serial_buffer_with_bcc, 4); // 提取4字节UID
 
-    // 3. 选卡 (SelectTag) 并获取SAK
-    status = SelectTag(serial_buffer_with_bcc, &sak_value);
-    printf("SelectTag card. Status code: %u\n", static_cast<unsigned int>(status));
-    if (status != StatusCode::MI_OK)
+    // 如果调用者提供了pUidLength指针，返回实际UID长度
+    if (pUidLength != nullptr)
     {
-        // printf("ReadIso14443aData: SelectTag failed (%u)\n", static_cast<unsigned int>(status));
-        return status;
+        *pUidLength = uid_length;
     }
-    printf("ReadIso14443aData: SAK = 0x%02X\n", sak_value);
+
+    // 如果UID长度小于4，用0填充剩余部分
+    if (uid_length < 4)
+    {
+        memset(pUidBuffer + uid_length, 0, 4 - uid_length);
+    }
+
+    printf("ReadIso14443aData: SAK = 0x%02X, UID length = %u\n", sak_value, uid_length);
+    printf("Complete UID: ");
+    for (int i = 0; i < uid_length; i++)
+    {
+        printf("%02X ", pUidBuffer[i]);
+    }
+    printf("\n");
 
     // 4. 根据SAK值判断是否需要Mifare认证
     bool needs_authentication = false;
@@ -758,22 +874,17 @@ MFRC522::StatusCode MFRC522::ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataB
     {
         needs_authentication = true;
     }
-    // Note: More sophisticated SAK parsing might be needed for a wider range of cards.
 
     if (needs_authentication)
     {
         // printf("ReadIso14443aData: Needs Mifare Authentication for block/page %u.\n", pageAddr);
-        status = Authenticate(PICC_Command::AUTHENT1A, pageAddr, DefaultKeyA, pUidBuffer4Bytes);
+        status = Authenticate(PICC_Command::AUTHENT1A, pageAddr, DefaultKeyA, pUidBuffer);
         printf("Authenticate card. Status code: %u\n", static_cast<unsigned int>(status));
         if (status != StatusCode::MI_OK)
         {
             // printf("ReadIso14443aData: Authenticate failed (%u)\n", static_cast<unsigned int>(status));
             return status;
         }
-    }
-    else
-    {
-        // printf("ReadIso14443aData: Skipping Mifare Authentication for SAK 0x%02X, page %u.\n", sak_value, pageAddr);
     }
 
     // 5. 读取数据块/页面
@@ -782,7 +893,6 @@ MFRC522::StatusCode MFRC522::ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataB
     printf("ReadBlock card. Status code: %u\n", static_cast<unsigned int>(status));
     if (status != StatusCode::MI_OK)
     {
-        // printf("ReadIso14443aData: ReadBlock failed (%u)\n", static_cast<unsigned int>(status));
         return status;
     }
 

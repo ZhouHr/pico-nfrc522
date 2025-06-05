@@ -42,8 +42,9 @@ public:
     {
         REQIDL = 0x26,    // 寻天线区内未进入休眠状态
         REQALL = 0x52,    // 寻天线区内全部卡
-        ANTICOLL1 = 0x93, // 防冲撞
-        ANTICOLL2 = 0x95, // 防冲撞
+        ANTICOLL1 = 0x93, // 防冲撞第1级
+        ANTICOLL2 = 0x95, // 防冲撞第2级
+        ANTICOLL3 = 0x97, // 防冲撞第3级
         AUTHENT1A = 0x60, // 验证A密钥
         AUTHENT1B = 0x61, // 验证B密钥
         READ = 0x30,      // 读块
@@ -175,17 +176,18 @@ public:
     void AntennaOn();
     void AntennaOff();
     StatusCode CommunicateWithTag(PCD_Command Command, const uint8_t *pInData,
-                                           uint8_t InLenByte, uint8_t *pOutData, uint32_t *pOutLenBit);
+                                  uint8_t InLenByte, uint8_t *pOutData, uint32_t *pOutLenBit);
     void CalulateCRC(const uint8_t *pIndata, uint8_t len, uint8_t *pOutData);
     StatusCode Request(PICC_Command req_code, uint8_t *pTagType);
-    StatusCode Anticollision(uint8_t *pSnr);
-    StatusCode SelectTag(const uint8_t *pSnr, uint8_t* pSakBuffer = nullptr);
+    StatusCode Anticollision(uint8_t *pSnr, uint8_t cascadeLevel = 1, uint8_t *pSak = nullptr);
+    StatusCode SelectTag(const uint8_t *pSnr, uint8_t *pSakBuffer = nullptr);
     StatusCode Authenticate(PICC_Command auth_mode, uint8_t addr, const uint8_t *pKey, const uint8_t *pSnr);
     StatusCode ReadBlock(uint8_t addr, uint8_t *pData);
     StatusCode WriteBlock(uint8_t addr, const uint8_t *pData);
     StatusCode HaltTag();
     StatusCode ReadCardUIDAndData(uint8_t blockAddr, uint8_t *pDataBuffer16Bytes, uint8_t *pUidBuffer4Bytes);
-    StatusCode ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataBuffer16Bytes, uint8_t *pUidBuffer4Bytes);
+    StatusCode ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataBuffer16Bytes, uint8_t *pUidBuffer, uint8_t *pUidLength);
+    StatusCode ReadCompleteUID(uint8_t *pUidBuffer, uint8_t *pUidLength, uint8_t *pSak = nullptr);
 
     // ===========
     // char PcdValue(unsigned char dd_mode, unsigned char addr, unsigned char *pValue);

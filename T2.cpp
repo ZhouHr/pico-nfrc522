@@ -51,7 +51,8 @@ int main()
     // printf("MFRC522 initialized.\n");
 
     uint8_t card_data_buffer[MFRC522::CARD_BLOCK_DATA_LEN];
-    uint8_t card_uid_buffer[4]; // For 4-byte UID
+    uint8_t card_uid_buffer[10]; // 足够存储7字节UID + 一些额外空间
+    uint8_t uid_length = 0;
 
     while (true)
     {
@@ -63,7 +64,7 @@ int main()
 
         printf("Attempting to read RFID card: UID and data from block 3...\n");
 
-        MFRC522::StatusCode status = rfid.ReadIso14443aData(start_page_address, card_data_buffer, card_uid_buffer);
+        MFRC522::StatusCode status = rfid.ReadIso14443aData(start_page_address, card_data_buffer, card_uid_buffer, &uid_length);
 
         if (status == MFRC522::StatusCode::MI_OK)
         {
@@ -75,7 +76,8 @@ int main()
             printf("\n");
 
             printf("Data from page/block %u (16 bytes): ", start_page_address);
-            for (int i = 0; i < MFRC522::CARD_BLOCK_DATA_LEN; i++) {
+            for (int i = 0; i < MFRC522::CARD_BLOCK_DATA_LEN; i++)
+            {
                 printf("%02X ", card_data_buffer[i]);
             }
             printf("\nOperation read successful!\n");
