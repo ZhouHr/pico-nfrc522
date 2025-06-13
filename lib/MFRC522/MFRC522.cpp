@@ -466,7 +466,7 @@ namespace RFID
             // 如果需要获取SAK值，调用SelectTag
             if (pSak != nullptr && status == StatusCode::MI_OK)
             {
-                status = SelectTag(pSnr, pSak);
+                status = SelectTag(pSnr, cascadeLevel, pSak);
             }
         }
 
@@ -481,14 +481,23 @@ namespace RFID
     //           pSakBuffer[OUT]:存储SAK值
     // 返    回: 成功返回MI_OK
     /////////////////////////////////////////////////////////////////////
-    MFRC522::StatusCode MFRC522::SelectTag(const uint8_t *pSerialNumber, uint8_t *pSakBuffer)
+    MFRC522::StatusCode MFRC522::SelectTag(const uint8_t *pSerialNumber, uint8_t cascadeLevel, uint8_t *pSakBuffer)
     {
         StatusCode status = StatusCode::MI_NOTAGERR;
         uint32_t received_bits;
         uint8_t i;
         uint8_t command_data[MAX_COMM_BUFFER_LEN]; // MAX_COMM_BUFFER_LEN = 18
 
-        command_data[0] = static_cast<uint8_t>(PICC_Command::ANTICOLL1); // 防冲撞命令
+        PICC_Command selectCmd;
+        switch (cascadeLevel) {
+            case 1: selectCmd = PICC_Command::ANTICOLL1; break;
+            case 2: selectCmd = PICC_Command::ANTICOLL2; break;
+            case 3: selectCmd = PICC_Command::ANTICOLL3; break;
+            default: return StatusCode::MI_ERR; // 无效的级联级别
+        }
+        command_data[0] = static_cast<uint8_t>(selectCmd);
+        
+        //command_data[0] = static_cast<uint8_t>(PICC_Command::ANTICOLL1); // 防冲撞命令
         command_data[1] = 0x70;
         command_data[6] = 0;
         for (i = 0; i < 4; i++)
@@ -553,11 +562,11 @@ namespace RFID
             {
                 *pSakBuffer = command_data[0]; // 存储SAK值
             }
-            if (command_data[0] & 0x04)
-            { // UID not complete, further cascading needed
-                return StatusCode::MI_ERR;
-            }
-            // status = StatusCode::MI_OK;
+            //if (command_data[0] & 0x04)
+            //{ // UID not complete, further cascading needed
+            //    return StatusCode::MI_ERR;
+            //}
+            status = StatusCode::MI_OK;
         }
         else
         {
