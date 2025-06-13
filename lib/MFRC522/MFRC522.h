@@ -231,7 +231,7 @@ namespace RFID
         // 卡片操作基本函数
         StatusCode Request(PICC_Command req_code, uint8_t *pTagType);
         StatusCode Anticollision(uint8_t *pSnr, uint8_t cascadeLevel = 1, uint8_t *pSak = nullptr);
-        StatusCode SelectTag(const uint8_t *pSnr, uint8_t *pSakBuffer = nullptr);
+        StatusCode SelectTag(const uint8_t *pSnr, uint8_t cascadeLevel = 1, uint8_t *pSakBuffer = nullptr);
         StatusCode Authenticate(PICC_Command auth_mode, uint8_t addr, const uint8_t *pKey, const uint8_t *pSnr);
         StatusCode ReadBlock(uint8_t addr, uint8_t *pData);
         StatusCode WriteBlock(uint8_t addr, const uint8_t *pData);
