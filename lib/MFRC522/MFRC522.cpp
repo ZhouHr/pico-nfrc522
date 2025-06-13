@@ -397,6 +397,7 @@ MFRC522::StatusCode MFRC522::Request(PICC_Command req_code, uint8_t *pTagType)
     ucComMF522Buf[0] = {static_cast<uint8_t>(req_code)};  // 取522要执行的命令
     // 向PICC发送寻天线区内全部卡命令，并接收PICC返回的数据
     status = CommunicateWithTag(PCD_Command::TRANSCEIVE, ucComMF522Buf, 1, ucComMF522Buf, &unLen);
+    printf("Request CommunicateWithTag. Status code: %u\n", static_cast<unsigned int>(status));
 
     if ((status == StatusCode::MI_OK) && (unLen == 0x10)) // 没有错误并接接收为2个字节
     {
@@ -464,7 +465,7 @@ MFRC522::StatusCode MFRC522::Anticollision(uint8_t *pSnr, uint8_t cascadeLevel, 
         // 如果需要获取SAK值，调用SelectTag
         if (pSak != nullptr && status == StatusCode::MI_OK)
         {
-            status = SelectTag(pSnr, pSak);
+            status = SelectTag(pSnr, cascadeLevel, pSak);
         }
     }
 
@@ -479,14 +480,23 @@ MFRC522::StatusCode MFRC522::Anticollision(uint8_t *pSnr, uint8_t cascadeLevel, 
 //           pSakBuffer[OUT]:存储SAK值
 // 返    回: 成功返回MI_OK
 /////////////////////////////////////////////////////////////////////
-MFRC522::StatusCode MFRC522::SelectTag(const uint8_t *pSerialNumber, uint8_t *pSakBuffer)
+MFRC522::StatusCode MFRC522::SelectTag(const uint8_t *pSerialNumber, uint8_t cascadeLevel, uint8_t *pSakBuffer)
 {
     StatusCode status = StatusCode::MI_NOTAGERR;
     uint32_t received_bits;
     uint8_t i;
     uint8_t command_data[MAX_COMM_BUFFER_LEN]; // MAX_COMM_BUFFER_LEN = 18
 
-    command_data[0] = static_cast<uint8_t>(PICC_Command::ANTICOLL1); // 防冲撞命令
+    PICC_Command selectCmd;
+    switch (cascadeLevel) {
+        case 1: selectCmd = PICC_Command::ANTICOLL1; break;
+        case 2: selectCmd = PICC_Command::ANTICOLL2; break;
+        case 3: selectCmd = PICC_Command::ANTICOLL3; break;
+        default: return StatusCode::MI_ERR; // 无效的级联级别
+    }
+    command_data[0] = static_cast<uint8_t>(selectCmd);
+
+    // command_data[0] = static_cast<uint8_t>(PICC_Command::ANTICOLL1); // 防冲撞命令
     command_data[1] = 0x70;
     command_data[6] = 0;
     for (i = 0; i < 4; i++)
@@ -531,11 +541,11 @@ MFRC522::StatusCode MFRC522::SelectTag(const uint8_t *pSerialNumber, uint8_t *pS
         {
             *pSakBuffer = command_data[0]; // 存储SAK值
         }
-        if (command_data[0] & 0x04)
-        { // UID not complete, further cascading needed
-            return StatusCode::MI_ERR;
-        }
-        // status = StatusCode::MI_OK;
+        // if (command_data[0] & 0x04)
+        // { // UID not complete, further cascading needed
+        //     return StatusCode::MI_ERR;
+        // }
+        status = StatusCode::MI_OK;
     }
     else
     {
@@ -722,7 +732,7 @@ MFRC522::StatusCode MFRC522::ReadCompleteUID(uint8_t *pUidBuffer, uint8_t *pUidL
         }
 
         // 选卡并获取SAK
-        status = SelectTag(currentUid, &currentSak);
+        status = SelectTag(currentUid, cascadeLevel, &currentSak);
         if (status != StatusCode::MI_OK)
         {
             return status;
@@ -825,13 +835,13 @@ MFRC522::StatusCode MFRC522::ReadIso14443aData(uint8_t pageAddr, uint8_t *pDataB
     uint8_t sak_value = 0xFF; // 初始化为一个无效的SAK值
 
     // 1. 寻卡 (Request)
-    status = Request(PICC_Command::REQALL, tag_type_buffer);
-    printf("Request card. Status code: %u\n", static_cast<unsigned int>(status));
-    if (status != StatusCode::MI_OK)
-    {
-        // printf("ReadIso14443aData: Request failed (%u)\n", static_cast<unsigned int>(status));
-        return status;
-    }
+    // status = Request(PICC_Command::REQALL, tag_type_buffer);
+    // printf("Request card. Status code: %u\n", static_cast<unsigned int>(status));
+    // if (status != StatusCode::MI_OK)
+    // {
+    //     // printf("ReadIso14443aData: Request failed (%u)\n", static_cast<unsigned int>(status));
+    //     return status;
+    // }
 
     // 1. 读取完整UID和SAK
     status = ReadCompleteUID(pUidBuffer, &uid_length, &sak_value);
